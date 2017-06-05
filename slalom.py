@@ -57,7 +57,6 @@ class Kayak:
         pygame.draw.circle(self.surface, helmet_color,
                            np.array(np.max(KAYAK_SHAPE, axis=0), int) // 2 + np.array([2, 0]),
                            HEAD_SIZE, 0)
-        self.collisionCounter = 0
 
     @property
     def rot_matrix(self):
@@ -86,14 +85,11 @@ class Kayak:
         return (False, None)
 
     def checkBoatCollisions(self, obstacles):
-        print(KAYAK_SHAPE - np.max(KAYAK_SHAPE, axis=0)/2)
-        shape = shapely.geometry.Polygon(np.tensordot(KAYAK_SHAPE - np.max(KAYAK_SHAPE, axis=0)/2, self.rot_matrix, [1,1]) + self.current_pose[:2])
+        shape = shapely.geometry.Polygon(np.tensordot(KAYAK_SHAPE - np.max(KAYAK_SHAPE, axis=0)/2, self.rot_matrix.T, [1,1]) + self.current_pose[:2])
         for o in obstacles:
             if shape.intersects(o.shape):
-                print(self.collisionCounter)
-                self.collisionCounter += 1
-                return True
-        return False
+                return (True, shape.intersection(o.shape))
+        return (False, None)
 
     def updatePose(self, dt):
         self.last_pose = self.current_pose.copy()
@@ -208,12 +204,13 @@ while not isFinished:
     # collision detection
     hasCollision, touched_gate = kayak.checkHeadCollisions(COURSE)
     if hasCollision and touched_gate not in touched_gates:
-        print('gate {} touched, 2 seconds penalty'.format(touched_gate))
         touched_gates.add(touched_gate)
         penalty_time += 2
 
-    if kayak.checkBoatCollisions(ROCKS):
-        print('rock collision')
+    hasCollision, collision = kayak.checkBoatCollisions(ROCKS)
+    if hasCollision:
+        pygame.draw.polygon(DISPLAYSURF, RED, collision.exterior.coords, 0)
+        print(collision.area, np.array(collision.centroid) - kayak.current_pose[:2])
 
     # check if finished
     if kayak.current_pose[0] > WIDTH:
