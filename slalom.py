@@ -157,7 +157,6 @@ pygame.font.init()
 myfont = pygame.font.SysFont('Ubuntu', 24)
 
 while not isFinished:
-
     for event in pygame.event.get():
         if event.type == QUIT:
             terminate()
@@ -227,8 +226,9 @@ while True:
                 terminate()
             elif event.key == K_BACKSPACE:
                 namebuffer = namebuffer[:-1]
-            elif ord('a') <= event.key <= ord('z'):
-                namebuffer += chr(event.key)
+            elif event.unicode:
+                namebuffer += event.unicode
+
 
     DISPLAYSURF.fill(BLACK)
     pygame.draw.rect(DISPLAYSURF, BLUE, (100, 0, WIDTH - 200, HEIGHT))
