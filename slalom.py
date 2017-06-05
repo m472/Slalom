@@ -187,14 +187,12 @@ while not isFinished:
     # collision detection
     hasCollision, touched_gate = kayak.checkCollisions(COURSE)
     if hasCollision and touched_gate not in touched_gates:
-        print('gate {} touched, 2 seconds penalty'.format(touched_gate))
         touched_gates.add(touched_gate)
         penalty_time += 2
 
     for ind, gate in enumerate(COURSE):
         # check if a gate was passed in flow direction
         if gate.checkPassed(kayak.last_pose, kayak.current_pose):
-            print('gate {} passed, current_gate is now {}'.format(ind, ind+1))
             if ind != current_gate:
                 penalty_time += 50
             current_gate = ind + 1
@@ -212,8 +210,6 @@ while not isFinished:
     pygame.display.update()
     fpsClock.tick(FPS)
 
-print('final penalty_time', penalty_time)
-
 namebuffer = ''
 while True:
     for event in pygame.event.get():
@@ -228,7 +224,6 @@ while True:
                 namebuffer = namebuffer[:-1]
             elif event.unicode:
                 namebuffer += event.unicode
-
 
     DISPLAYSURF.fill(BLACK)
     pygame.draw.rect(DISPLAYSURF, BLUE, (100, 0, WIDTH - 200, HEIGHT))
