@@ -19,14 +19,64 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 YELLOW = (255, 255, 0)
 
-KAYAK_SIZE = (50, 12)
 FPS = 60
+KAYAK_SHAPE = np.array([[  0.        ,   6.        ],
+                        [ 19.93968637,  11.62191781],
+                        [ 23.37756333,  12.        ],
+                        [ 31.45958987,  11.55616438],
+                        [ 44.53558504,   8.59726027],
+                        [ 50.        ,   6.        ],
+                        [ 50.        ,   6.        ],
+                        [ 44.53558504,   3.40273973],
+                        [ 31.45958987,   0.44383562],
+                        [ 23.37756333,   0.        ],
+                        [ 19.93968637,   0.37808219],
+                        [  0.        ,   6.        ]])
 
 MAX_FORWARD_SPEED = 25
 MAX_BACKWARD_SPEED = 15
 MAX_ROTATION_SPEED = 55 * np.pi / 180
 KAYAK_DRAG_TENSOR = np.array([[0.2,   0],
                               [  0, 0.4]], float)
+
+class Kayak:
+    def __init__(self, initial_pose, initial_velocity, color, helmet_color, drag_tensor):
+        self.current_pose = np.array(initial_pose, float)
+        self.last_pose = self.current_pose
+        self.current_velocity = np.array(initial_velocity, float)
+        self.drag_tensor = np.array(drag_tensor, float)
+        self.current_angular_velocity = 0
+        self.current_forward_velocity = 0
+
+        self.surface = pygame.Surface(np.max(KAYAK_SHAPE, axis=0))
+        self.surface.fill(BLUE)
+        pygame.draw.polygon(self.surface, color, KAYAK_SHAPE, 0)
+        pygame.draw.circle(self.surface, helmet_color, np.array(np.max(KAYAK_SHAPE, axis=0), int) // 2 + np.array([2, 0]), 5, 0)
+
+    def setVelocity(self, velocity):
+        self.current_forward_velocity = velocity
+
+    def setAngularVelocity(self, velocity):
+        self.current_angular_velocity = velocity
+
+    def updateVelocity(self, flow):
+        self.current_velocity = np.zeros_like(self.current_velocity)
+        rot_matrix = np.array([[cos(self.current_pose[2]), -sin(self.current_pose[2])],
+                            [sin(self.current_pose[2]), cos(self.current_pose[2])]], float)
+        rotated_drag_tensor = rot_matrix.T.dot(self.drag_tensor.dot(rot_matrix))
+
+        self.current_velocity[:2] += flow * np.diag(rotated_drag_tensor)
+        self.current_velocity[:2] += self.current_forward_velocity * np.array([cos(self.current_pose[2]), -sin(self.current_pose[2])])
+        self.current_velocity[2] += self.current_angular_velocity
+
+    def updatePose(self, dt):
+        self.last_pose = self.current_pose.copy()
+        self.current_pose += self.current_velocity * dt
+
+    def draw(self, surf):
+        rot_surf = pygame.transform.rotate(self.surface, self.current_pose[2] * 180 / np.pi)
+        surfsize = np.array(rot_surf.get_size(), int)
+        surf.blit(rot_surf, tuple(self.current_pose[:2] - surfsize / 2))
 
 class Gate:
     def __init__(self, position, width, isDownstream):
@@ -39,7 +89,12 @@ class Gate:
     def checkPassed(self, prevPose, currPose):
         pos_downstream = min(prevPose[0], currPose[1])
         pos_upstream = max(prevPose[0], currPose[1])
-        if prevPose[0] <= self.position[0] < currPose[0]:
+        positions = [pos_upstream, pos_downstream]
+
+        if not self.isDownstream:
+            positions = positions[::-1]
+
+        if positions[0] < self.position[0] < self.position[1]:
             vertical_pos = (prevPose + currPose)[1] / 2
             return self.leftPostPos[1] < vertical_pos < self.rightPostPos[1]
         else:
@@ -56,49 +111,36 @@ GATE_WIDTH = 35
 COURSE = [Gate([150, 150], GATE_WIDTH, True),
           Gate([300, 200], GATE_WIDTH, True),
           Gate([450, 150], GATE_WIDTH, True),
-          Gate([650, 250], GATE_WIDTH, True),
+          Gate([650, 250], GATE_WIDTH, False),
           Gate([750, 170], GATE_WIDTH, True)]
 
-current_pose = np.array([0, 200, 0], float)
 current_flow = np.array([70, 0], float)
-current_speed = np.array([0, 0], float)
-
-kayak_surface = pygame.Surface(KAYAK_SIZE)
-kayak_surface.fill(BLUE)
-pygame.draw.ellipse(kayak_surface, YELLOW, (0, 0) + KAYAK_SIZE, 0)
-pygame.draw.circle(kayak_surface, WHITE,
-                   np.array(KAYAK_SIZE) // 2 + np.array([2, 0]), 5, 0)
-
 
 fpsClock = pygame.time.Clock()
 start_time = time.time()
 penalty_time = 0
 
-def setVelocity(vel):
-    current_speed[0] = vel
-
-def setRotationSpeed(rot_vel):
-    current_speed[1] = rot_vel
-
 def terminate():
     pygame.quit()
     sys.exit()
 
-keymappings = {
-    K_UP : [(setVelocity, MAX_FORWARD_SPEED), (setVelocity, 0)],
-    K_DOWN : [(setVelocity, MAX_BACKWARD_SPEED), (setVelocity, 0)],
-    K_LEFT : [(setRotationSpeed, MAX_ROTATION_SPEED), (setRotationSpeed, 0)],
-    K_RIGHT : [(setRotationSpeed, -MAX_ROTATION_SPEED), (setRotationSpeed, 0)],
-    K_ESCAPE : [(terminate,), (None,)],
-}
-
+kayak = Kayak([0,200,0], [0,0,0], YELLOW, WHITE, KAYAK_DRAG_TENSOR)
 current_gate = 0
 isFinished = False
 
+keymappings = {
+    K_UP : [(kayak.setVelocity, MAX_FORWARD_SPEED), (kayak.setVelocity, 0)],
+    K_DOWN : [(kayak.setVelocity, -MAX_BACKWARD_SPEED), (kayak.setVelocity, 0)],
+    K_LEFT : [(kayak.setAngularVelocity, MAX_ROTATION_SPEED), (kayak.setAngularVelocity, 0)],
+    K_RIGHT : [(kayak.setAngularVelocity, -MAX_ROTATION_SPEED), (kayak.setAngularVelocity, 0)],
+    K_ESCAPE : [(terminate,), (None,)],
+}
+
 pygame.font.init()
-myfont = pygame.font.SysFont('Ubuntu', 18)
+myfont = pygame.font.SysFont('Ubuntu', 24)
 
 while not isFinished:
+
     for event in pygame.event.get():
         if event.type == QUIT:
             terminate()
@@ -116,19 +158,15 @@ while not isFinished:
                 pass
 
     # Update game data
-    last_pose = current_pose.copy()
-    rot_matrix = np.array([[cos(current_pose[2]), -sin(current_pose[2])],
-                           [sin(current_pose[2]), cos(current_pose[2])]], float)
-    rotated_flow_tensor = rot_matrix.T.dot(KAYAK_DRAG_TENSOR.dot(rot_matrix))
-    current_pose[0] += (current_flow[0] * rotated_flow_tensor[0, 0] \
-                     + current_speed[0] * np.cos(current_pose[2])) * 1.0/FPS
-    current_pose[1] += (current_flow[1] * rotated_flow_tensor[1, 1] \
-                     - current_speed[0] * np.sin(current_pose[2])) * 1.0/FPS
-    current_pose[2] += current_speed[1] * 1.0/FPS
+    kayak.updateVelocity(current_flow)
+    kayak.updatePose(1.0/FPS)
 
     # check if finished
-    if current_pose[0] > WIDTH:
+    if kayak.current_pose[0] > WIDTH:
         isFinished = True
+        end_time = time.time()
+        if current_gate != len(COURSE):
+            penalty_time += 10
 
     # collision detection
     for gate in COURSE:
@@ -136,18 +174,14 @@ while not isFinished:
 
     for ind, gate in enumerate(COURSE):
         # check if a gate was passed in flow direction
-        if gate.checkPassed(last_pose, current_pose):
+        if gate.checkPassed(kayak.last_pose, kayak.current_pose):
             if ind != current_gate:
-                penalty_time += 10
+                penalty_time += 50
             current_gate = ind + 1
 
     # Draw
-    surface2 = pygame.transform.rotate(kayak_surface,
-                                       current_pose[2] * 180 / np.pi)
-    surfsize = np.array(surface2.get_size(), int)
-
     DISPLAYSURF.fill(BLUE)
-    DISPLAYSURF.blit(surface2, tuple(current_pose[:2] - surfsize / 2))
+    kayak.draw(DISPLAYSURF)
 
     half_gate_width = np.array([0, GATE_WIDTH//2])
     for gate in COURSE:
@@ -156,15 +190,37 @@ while not isFinished:
     textsurface = myfont.render('{0:.2f}'.format(time.time() - start_time + penalty_time),
                                 False, WHITE)
     DISPLAYSURF.blit(textsurface, ((WIDTH - textsurface.get_size()[0])/2, 50))
-
     pygame.display.update()
-
     fpsClock.tick(FPS)
 
+namebuffer = ''
 while True:
+    for event in pygame.event.get():
+        if event.type == QUIT:
+            terminate()
+        if event.type == KEYDOWN:
+            if event.key == K_ESCAPE:
+                terminate()
+            elif event.key == K_RETURN:
+                terminate()
+            elif event.key == K_BACKSPACE:
+                namebuffer = namebuffer[:-1]
+            elif ord('a') <= event.key <= ord('z'):
+                namebuffer += chr(event.key)
+
     DISPLAYSURF.fill(BLACK)
     pygame.draw.rect(DISPLAYSURF, BLUE, (100, 0, WIDTH - 200, HEIGHT))
+
+    textsurface = myfont.render('Gesamtzeit: {0:.2f}'.format(end_time - start_time + penalty_time),
+                                False, WHITE)
+    DISPLAYSURF.blit(textsurface, ((WIDTH - textsurface.get_size()[0])/2, 100))
+
+    textsurface = myfont.render('Bitte Name eingeben:', False, WHITE)
+    DISPLAYSURF.blit(textsurface, ((WIDTH - textsurface.get_size()[0])/2, 150))
+
+    textsurface = myfont.render(namebuffer, False, WHITE)
+    DISPLAYSURF.blit(textsurface, ((WIDTH - textsurface.get_size()[0])/2, 170))
+
     pygame.display.update()
     fpsClock.tick(FPS)
-
 
