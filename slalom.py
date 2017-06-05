@@ -187,6 +187,7 @@ while not isFinished:
     # collision detection
     hasCollision, touched_gate = kayak.checkCollisions(COURSE)
     if hasCollision and touched_gate not in touched_gates:
+        print('gate {} touched, 2 seconds penalty'.format(touched_gate))
         touched_gates.add(touched_gate)
         penalty_time += 2
 
