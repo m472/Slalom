@@ -87,14 +87,12 @@ class Gate:
         self.isDownstream = isDownstream
 
     def checkPassed(self, prevPose, currPose):
-        pos_downstream = min(prevPose[0], currPose[1])
-        pos_upstream = max(prevPose[0], currPose[1])
-        positions = [pos_upstream, pos_downstream]
+        positions = [prevPose[0], currPose[0]]
 
         if not self.isDownstream:
             positions = positions[::-1]
 
-        if positions[0] < self.position[0] < self.position[1]:
+        if positions[0] < self.position[0] < positions[1]:
             vertical_pos = (prevPose + currPose)[1] / 2
             return self.leftPostPos[1] < vertical_pos < self.rightPostPos[1]
         else:
@@ -166,7 +164,7 @@ while not isFinished:
         isFinished = True
         end_time = time.time()
         if current_gate != len(COURSE):
-            penalty_time += 10
+            penalty_time += 50
 
     # collision detection
     for gate in COURSE:
@@ -175,6 +173,7 @@ while not isFinished:
     for ind, gate in enumerate(COURSE):
         # check if a gate was passed in flow direction
         if gate.checkPassed(kayak.last_pose, kayak.current_pose):
+            print('gate {} passed, current_gate is now {}'.format(ind, ind+1))
             if ind != current_gate:
                 penalty_time += 50
             current_gate = ind + 1
@@ -192,6 +191,8 @@ while not isFinished:
     DISPLAYSURF.blit(textsurface, ((WIDTH - textsurface.get_size()[0])/2, 50))
     pygame.display.update()
     fpsClock.tick(FPS)
+
+print('final penalty_time', penalty_time)
 
 namebuffer = ''
 while True:
