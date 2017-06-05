@@ -20,6 +20,7 @@ RED = (255, 0, 0)
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 YELLOW = (255, 255, 0)
+GRAY = (80, 80, 80)
 
 FPS = 60
 KAYAK_SHAPE = np.array([[  0.        ,   6.        ],
@@ -51,12 +52,17 @@ class Kayak:
         self.current_angular_velocity = 0
         self.current_forward_velocity = 0
 
-        self.surface = pygame.Surface(np.max(KAYAK_SHAPE, axis=0))
-        self.surface.fill(BLUE)
+        self.surface = pygame.Surface(np.max(KAYAK_SHAPE, axis=0), pygame.SRCALPHA)
         pygame.draw.polygon(self.surface, color, KAYAK_SHAPE, 0)
         pygame.draw.circle(self.surface, helmet_color,
                            np.array(np.max(KAYAK_SHAPE, axis=0), int) // 2 + np.array([2, 0]),
                            HEAD_SIZE, 0)
+        self.collisionCounter = 0
+
+    @property
+    def rot_matrix(self):
+        return  np.array([[cos(self.current_pose[2]), -sin(self.current_pose[2])],
+                          [sin(self.current_pose[2]),  cos(self.current_pose[2])]], float)
 
     def setVelocity(self, velocity):
         self.current_forward_velocity = velocity
@@ -66,20 +72,28 @@ class Kayak:
 
     def updateVelocity(self, flow):
         self.current_velocity = np.zeros_like(self.current_velocity)
-        rot_matrix = np.array([[cos(self.current_pose[2]), -sin(self.current_pose[2])],
-                            [sin(self.current_pose[2]), cos(self.current_pose[2])]], float)
-        rotated_drag_tensor = rot_matrix.T.dot(self.drag_tensor.dot(rot_matrix))
+        rotated_drag_tensor = self.rot_matrix.T.dot(self.drag_tensor.dot(self.rot_matrix))
 
         self.current_velocity[:2] += flow * np.diag(rotated_drag_tensor)
         self.current_velocity[:2] += self.current_forward_velocity * np.array([cos(self.current_pose[2]), -sin(self.current_pose[2])])
         self.current_velocity[2] += self.current_angular_velocity
 
-    def checkCollisions(self, gates):
+    def checkHeadCollisions(self, gates):
         shape = shapely.geometry.Point(self.current_pose[:2]).buffer(HEAD_SIZE/2)
         for ind, gate in enumerate(gates):
             if shape.intersects(gate.shape):
                 return (True, ind)
         return (False, None)
+
+    def checkBoatCollisions(self, obstacles):
+        print(KAYAK_SHAPE - np.max(KAYAK_SHAPE, axis=0)/2)
+        shape = shapely.geometry.Polygon(np.tensordot(KAYAK_SHAPE - np.max(KAYAK_SHAPE, axis=0)/2, self.rot_matrix, [1,1]) + self.current_pose[:2])
+        for o in obstacles:
+            if shape.intersects(o.shape):
+                print(self.collisionCounter)
+                self.collisionCounter += 1
+                return True
+        return False
 
     def updatePose(self, dt):
         self.last_pose = self.current_pose.copy()
@@ -89,6 +103,18 @@ class Kayak:
         rot_surf = pygame.transform.rotate(self.surface, self.current_pose[2] * 180 / np.pi)
         surfsize = np.array(rot_surf.get_size(), int)
         surf.blit(rot_surf, tuple(self.current_pose[:2] - surfsize / 2))
+
+class Rock:
+    def __init__(self, edge_positions, color):
+        edge_positions = np.array(edge_positions, float)
+        self.shape = shapely.geometry.Polygon(edge_positions)
+        self.top_left_corner = np.min(edge_positions, axis=0)
+        self.surface = pygame.Surface(np.max(edge_positions, axis=0), pygame.SRCALPHA)
+        pygame.draw.polygon(self.surface, color, edge_positions - self.top_left_corner, 0)
+        rocksurf = pygame.draw.polygon
+
+    def draw(self, surf):
+        surf.blit(self.surface, self.top_left_corner)
 
 class Gate:
     def __init__(self, position, width, isDownstream, poleDiameter):
@@ -129,6 +155,8 @@ COURSE = [Gate([150, 150], GATE_WIDTH, True, GATE_POLE_DIAM),
           Gate([450, 150], GATE_WIDTH, True, GATE_POLE_DIAM),
           Gate([650, 250], GATE_WIDTH, False, GATE_POLE_DIAM),
           Gate([750, 170], GATE_WIDTH, True, GATE_POLE_DIAM)]
+
+ROCKS = [Rock([[304, 222], [320, 230], [310, 216]], GRAY)]
 
 current_flow = np.array([70, 0], float)
 
@@ -177,6 +205,16 @@ while not isFinished:
     kayak.updateVelocity(current_flow)
     kayak.updatePose(1.0/FPS)
 
+    # collision detection
+    hasCollision, touched_gate = kayak.checkHeadCollisions(COURSE)
+    if hasCollision and touched_gate not in touched_gates:
+        print('gate {} touched, 2 seconds penalty'.format(touched_gate))
+        touched_gates.add(touched_gate)
+        penalty_time += 2
+
+    if kayak.checkBoatCollisions(ROCKS):
+        print('rock collision')
+
     # check if finished
     if kayak.current_pose[0] > WIDTH:
         isFinished = True
@@ -184,13 +222,7 @@ while not isFinished:
         if current_gate != len(COURSE):
             penalty_time += 50
 
-    # collision detection
-    hasCollision, touched_gate = kayak.checkCollisions(COURSE)
-    if hasCollision and touched_gate not in touched_gates:
-        print('gate {} touched, 2 seconds penalty'.format(touched_gate))
-        touched_gates.add(touched_gate)
-        penalty_time += 2
-
+    # check if any gates were passed
     for ind, gate in enumerate(COURSE):
         # check if a gate was passed in flow direction
         if gate.checkPassed(kayak.last_pose, kayak.current_pose):
@@ -201,6 +233,9 @@ while not isFinished:
     # Draw
     DISPLAYSURF.fill(BLUE)
     kayak.draw(DISPLAYSURF)
+
+    for rock in ROCKS:
+        rock.draw(DISPLAYSURF)
 
     for gate in COURSE:
         gate.draw(DISPLAYSURF)
